@@ -574,14 +574,27 @@ Any other interesting observations based on what you learned this week?
 ```{r}
 library(readr)
 LDW <- read_csv("LDW_combcensus.csv")
-Freq_LDW <- as.data.frame(table(LDW$Latin))
+Freq_LDW <- as.data.frame(table(LDW$Latin, LDW$Quadrat))
 Freq_LDW <- as.data.frame(t(Freq_LDW))
 
-colnames(Freq_LDW) <- Freq_LDW[1, ]
-Freq_LDW <- Freq_LDW[-1, ]
+data <- data.frame(
+  Group = Freq_LDW$Var2,
+  Subgroup = Freq_LDW$Var1,
+  Count = Freq_LDW$Freq
+  )
+
+library(tidyr)
+library(dplyr)
+
+Freq_LDW_final <- data %>%
+  group_by(Group, Subgroup) %>%
+  summarise(Count = unique(Count), .groups = 'drop') %>%
+  pivot_wider(names_from = Subgroup, values_from = Count, values_fill = 0)
+
+write.csv(Freq_LDW_final, "Freq_LDW_final.csv", row.names = FALSE)
 ```
 
-> Answer: There are 26 species of trees in the dataset. The dataset has the information on associated mycorrhizal fungi (AM vs. ECM), so the research question related to this variable will be interesting topic.
+> Answer: There are 26 species of trees in 625 sites. The dataset has the information on associated mycorrhizal fungi (AM vs. ECM), so the research question related to this variable will be interesting topic.
 
 
 ## SUBMITTING YOUR ASSIGNMENT
