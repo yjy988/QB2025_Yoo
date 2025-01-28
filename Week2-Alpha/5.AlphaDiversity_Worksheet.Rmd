@@ -575,7 +575,6 @@ Any other interesting observations based on what you learned this week?
 library(readr)
 LDW <- read_csv("LDW_combcensus.csv")
 Freq_LDW <- as.data.frame(table(LDW$Latin, LDW$Quadrat))
-Freq_LDW <- as.data.frame(t(Freq_LDW))
 
 data <- data.frame(
   Group = Freq_LDW$Var2,
