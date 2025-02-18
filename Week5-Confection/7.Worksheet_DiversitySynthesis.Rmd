@@ -1,6 +1,6 @@
 ---
 title: '7\. Worksheet: Diversity Synthesis'
-author: "Student Name; Z620: Quantitative Biodiversity, Indiana University"
+author: "Jaeyoung Yoo; Z620: Quantitative Biodiversity, Indiana University"
 date: "`r format(Sys.time(), '%d %B, %Y')`"
 output: pdf_document
 geometry: margin=2.54cm
@@ -48,6 +48,7 @@ Each student will sample the source community and bin their jelly beans into ope
 knitr::include_graphics("data/jelly.png")
 ```
 
+
 ## SAMPLING PROTOCOL: PREFERENCE-PROFILE MATRIX
 
 1. With your individual sample only, each student should choose their top 5-10 preferred taxa based on flavor, color, sheen, etc.
@@ -65,8 +66,77 @@ In the R code chunk below, please provide the code to:
 4) Load the `vegan` R package (be sure to install first if you have not already).
 
 ```{r}
+rm(list = ls())
+getwd()
+setwd("/cloud/project/QB2025_Yoo/Week5-Confection")
 
+package.list <- c("vegan", "tidyverse", "ggplot2", "dplyr", "broom", "vegan", "ade4", "viridis", "gplots", "indicspecies")
+for (package in package.list) {
+  if (!require(package, character.only = TRUE, quietly = TRUE)) {
+    install.packages(package)
+  }
+  library(c(package), character.only = TRUE)
+}
+```
 
+```{R, include = FALSE}
+add.spec.scores <-
+  function(ordi,comm,method="cor.scores",multi=1,Rscale=F,scaling="1") {
+    ordiscores <- scores(ordi,display="sites")
+    n <- ncol(comm)
+    p <- ncol(ordiscores)
+    specscores <- array(NA,dim=c(n,p))
+    rownames(specscores) <- colnames(comm)
+    colnames(specscores) <- colnames(ordiscores)
+    if (method == "cor.scores") {
+      for (i in 1:n) {
+        for (j in 1:p) {specscores[i,j] <- cor(comm[,i],ordiscores[,j],method="pearson")}
+      }
+    }
+    if (method == "wa.scores") {specscores <- wascores(ordiscores,comm)}
+    if (method == "pcoa.scores") {
+      rownames(ordiscores) <- rownames(comm)
+      eigenv <- ordi$eig
+      accounted <- sum(eigenv)
+      tot <- 2*(accounted/ordi$GOF[2])-(accounted/ordi$GOF[1])
+      eigen.var <- eigenv/(nrow(comm)-1)
+      neg <- length(eigenv[eigenv<0])
+      pos <- length(eigenv[eigenv>0])
+      tot <- tot/(nrow(comm)-1)
+      eigen.percen <- 100*eigen.var/tot
+      eigen.cumpercen <- cumsum(eigen.percen)
+      constant <- ((nrow(comm)-1)*tot)^0.25
+      ordiscores <- ordiscores * (nrow(comm)-1)^-0.5 * tot^-0.5 * constant
+      p1 <- min(p, pos)
+      for (i in 1:n) {
+        for (j in 1:p1) {
+          specscores[i,j] <- cor(comm[,i],ordiscores[,j])*sd(comm[,i])/sd(ordiscores[,j])
+          if(is.na(specscores[i,j])) {specscores[i,j]<-0}
+        }
+      }
+      if (Rscale==T && scaling=="2") {
+        percen <- eigen.var/tot
+        percen <- percen^0.5
+        ordiscores <- sweep(ordiscores,2,percen,"/")   
+        specscores <- sweep(specscores,2,percen,"*")
+      }
+      if (Rscale==F) {
+        specscores <- specscores / constant
+        ordiscores <- ordi$points
+      }        
+      ordi$points <- ordiscores
+      ordi$eig <- eigen.var
+      ordi$eig.percen <- eigen.percen
+      ordi$eig.cumpercen <- eigen.cumpercen
+      ordi$eigen.total <- tot
+      ordi$R.constant <- constant
+      ordi$Rscale <- Rscale
+      ordi$scaling <- scaling
+    }
+    specscores <- specscores * multi    
+    ordi$cproj <- specscores
+    return(ordi)
+  }
 ```
 
 ## DATA ANALYSIS
@@ -75,12 +145,19 @@ In the R code chunk below, please provide the code to:
 Based on these results, discuss how individual vs. collective sampling efforts capture the diversity of the source community.
 
 ```{r}
+dat <- read.csv(file = "./jelly_SbyS.csv", header = TRUE, row.names = 1)
+prefer <- read.csv(file = "./jelly_preference.csv", header = TRUE, row.names = 1)
 
-
+jelly <- specnumber(dat)
+min.N <- min(rowSums(dat))
+S.rarefy <- rarefy(x = dat, sample = min.N, se =TRUE)
+rarecurve(x = dat, step = 20, col = "blue", cex = 0.6, las = 1)
+abline(0, 1, col = "red")
+text(1500, 1500, "1:1", pos = 2, col = "red")
 ```
 
 > ***Answer 1***:
->
+> The individual sampling efforts (Blue lines) capture less species than collective efforts (Red line). Increasing number of individuals may capture more species. Also, there are variations in the number of species captured in each individuals, Maddy captured lowest number of species while El captured the highest number of species.
 
 
 **Question 2:** Starting with the site-by-species matrix, visualize beta diversity.
@@ -90,23 +167,123 @@ Which "species" are contributing the patterns in the ordinations?
 How does the choice of resemblance matrix affect your interpretation?
 
 ```{r}
+# Calculate Jaccard (Incidence-based)
+jelly.dj <- vegdist(dat, method = "jaccard", binary = TRUE)
+
+# Calculate Bray-Curtis (Abundance-based)
+jelly.db <- vegdist(dat, method = "bray", diag = TRUE)
+
+## PCoA using Bray-Curtis
+jelly.pcoa1 <- cmdscale(jelly.db, eig = TRUE, k = 3)
+
+explainvar1 <- round(jelly.pcoa1$eig[1] / sum(jelly.pcoa1$eig), 3) * 100
+explainvar2 <- round(jelly.pcoa1$eig[2] / sum(jelly.pcoa1$eig), 3) * 100
+explainvar3 <- round(jelly.pcoa1$eig[3] / sum(jelly.pcoa1$eig), 3) * 100
+sum.eig <- sum(explainvar1, explainvar2, explainvar3)
+
+# Define plot parameters
+par(mar = c(5, 5, 1, 2) + 0.1)
+
+# Initiate plot
+plot(jelly.pcoa1$points[, 1], jelly.pcoa1$points[, 2],
+     xlab = paste("PCoA 1 (", explainvar1, "%)", sep = ""), 
+     xlim = c(-0.3, 0.4),  
+     ylim = c(-0.3, 0.4),
+     ylab = paste("PCoA 2 (", explainvar2, "%)", sep = ""),
+     pch = 16, cex = 2.0, type = "n", cex.lab = 1.5, cex.axis = 1.2, axes = FALSE)
+
+# Add axes
+axis(side = 1, labels = TRUE, lwd.ticks = 2, cex.axis = 1.2, las = 1)
+axis(side = 2, labels = TRUE, lwd.ticks = 2, cex.axis = 1.2, las = 1)
+abline(h = 0, v = 0, lty = 3)
+box(lwd = 2)
+title(main = "PCoA using Bray-Curtis distance")
+
+# Add points & labels
+points(jelly.pcoa1$points[, 1], jelly.pcoa1$points[, 2], pch = 19, cex = 3, bg = "gray", col = "gray")
+text(jelly.pcoa1$points[, 1], jelly.pcoa1$points[, 2], labels = row.names(jelly.pcoa1$points))
+
+# First we calculate the relative abundances of each species at each site
+jellyREL <- dat
+for (i in 1:nrow(dat)) {
+    jellyREL[i, ] = dat[i, ] / sum(dat[i, ])
+    }
+
+# Now, we use this information to calculate and add species scores
+jelly.pcoa1 <- add.spec.scores(jelly.pcoa1, jellyREL, method = "pcoa.scores")
+text(jelly.pcoa1$cproj[, 1], jelly.pcoa1$cproj[, 2], 
+    labels = row.names(jelly.pcoa1$cproj), col = "blue")
 
 
+## PCoA using Bray-Curtis
+jelly.pcoa1 <- cmdscale(jelly.dj, eig = TRUE, k = 3)
+
+explainvar1 <- round(jelly.pcoa1$eig[1] / sum(jelly.pcoa1$eig), 3) * 100
+explainvar2 <- round(jelly.pcoa1$eig[2] / sum(jelly.pcoa1$eig), 3) * 100
+explainvar3 <- round(jelly.pcoa1$eig[3] / sum(jelly.pcoa1$eig), 3) * 100
+sum.eig <- sum(explainvar1, explainvar2, explainvar3)
+
+# Define plot parameters
+par(mar = c(5, 5, 1, 2) + 0.1)
+
+# Initiate plot
+plot(jelly.pcoa1$points[, 1], jelly.pcoa1$points[, 2],
+     xlab = paste("PCoA 1 (", explainvar1, "%)", sep = ""), 
+     xlim = c(-0.3, 0.4),  
+     ylim = c(-0.3, 0.4),
+     ylab = paste("PCoA 2 (", explainvar2, "%)", sep = ""),
+     pch = 16, cex = 2.0, type = "n", cex.lab = 1.5, cex.axis = 1.2, axes = FALSE)
+
+# Add axes
+axis(side = 1, labels = TRUE, lwd.ticks = 2, cex.axis = 1.2, las = 1)
+axis(side = 2, labels = TRUE, lwd.ticks = 2, cex.axis = 1.2, las = 1)
+abline(h = 0, v = 0, lty = 3)
+box(lwd = 2)
+title(main = "PCoA using Jaccard distance")
+
+# Add points & labels
+points(jelly.pcoa1$points[, 1], jelly.pcoa1$points[, 2], pch = 19, cex = 3, bg = "gray", col = "gray")
+text(jelly.pcoa1$points[, 1], jelly.pcoa1$points[, 2], labels = row.names(jelly.pcoa1$points))
+
+# First we calculate the relative abundances of each species at each site
+jellyREL <- dat
+for (i in 1:nrow(dat)) {
+    jellyREL[i, ] = dat[i, ] / sum(dat[i, ])
+    }
+
+# Now, we use this information to calculate and add species scores
+jelly.pcoa1 <- add.spec.scores(jelly.pcoa1, jellyREL, method = "pcoa.scores")
+text(jelly.pcoa1$cproj[, 1], jelly.pcoa1$cproj[, 2], 
+    labels = row.names(jelly.pcoa1$cproj), col = "blue")
 ```
 
 > ***Answer 2***:
->
+> PCoA plot based on Bray-Curtis distance (abundance-based matrix) shows that species such as Sour cherry, Raspberry and Crushed Pineapple are dispersed from main cluster, which means that they are contributing to the patterns. On the other hand, PCoA plot based on Jaccard distance (incidence-based matrix) shows that species such as Sour cherry and Raspberry are contributing to the patterns. However, the PCoA plots based on different distances show different results that pattern of sites clustered are quite different. For example, in PCoA plot based on Bray-Curtis distance, Elaine, Bryan and Jaeyoung are clustered in third quadrant, while they are dispersed in first and fourth quadrant in PCoA plot based on Jaccard distance.
 
 
 **Question 3** Using the preference-profile matrix, determine the most popular jelly bean in the class using a control structure (e.g., for loop, if statement, function, etc).
 
 ```{r}
+# Variables
+max_count <- 0
+best_flavor <- ""
 
+# Iterate through each flavor
+for (flavor in colnames(prefer)) {
+  count_ones <- sum(prefer[[flavor]] == 1, na.rm = TRUE)
+  # Check if this flavor has the most 1
+  if (count_ones > max_count) {
+    max_count <- count_ones
+    best_flavor <- flavor
+  }
+}
 
+# Print the flavor with the most 1s
+cat("The most popular jelly bean flavor:", best_flavor, "with", max_count, "votes.")
 ```
 
 > ***Answer 3***:
->
+> The most popular jelly bean flavor is Berry Blue with 7 votes.
 
 
 **Question 4**
@@ -118,14 +295,23 @@ Make some observations about the preference-profiles of the class.
 
 
 ```{r}
+# Replace NA values with 0 in 'prefer' dataset
+prefer[is.na(prefer)] <- 0
 
+# Calculate Jaccard
+prefer.dj <- vegdist(prefer, method = "jaccard", binary = TRUE)
 
+# Perform cluster analysis
+prefer.ward <- hclust(prefer.dj, method = "ward.D2")
+
+# Plot cluster
+par(mar = c(1, 5, 2, 2) + 0.1)
+plot(prefer.ward, main = "QB jelly bean preference: Ward's Clustering", 
+     ylab = "Squared Jaccard Distance")
 ```
 
 > ***Answer 4***:
->
-
-
+> Madison is my jelly buddy, and our preference is quite similar because our preferences are clustered in lowest threshold of about 0.4 of squared Jaccard distance. Elain and Bryan, Jocelyn and Aishwarya, Anna and Yongsoo, Trang and Emma are clustered together as jelly buddy.
 
 
 ## SUBMITTING YOUR ASSIGNMENT
