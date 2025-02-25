@@ -1,0 +1,336 @@
+---
+title: 'Group Project'
+author: "Jaeyoung Yoo; Z620: Quantitative Biodiversity, Indiana University"
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+output: pdf_document
+geometry: margin=2.54cm
+---
+
+```{r setup, include=FALSE}
+rm(list = ls())
+setwd("/cloud/project/QB2025_Yoo/GroupProject")
+
+# Load necessary libraries & load data
+library(tidyr)
+library(dplyr)
+
+package.list <- c("vegan", "ade4", "viridis", "gplots", "indicspecies")
+for (package in package.list) {
+  if (!require(package, character.only = TRUE, quietly = TRUE)) {
+    install.packages(package)
+    library(package, character.only = TRUE)
+  }
+}
+```
+
+```{R, include = FALSE}
+##Manually apply BiodiversityR package
+add.spec.scores <-
+  function(ordi,comm,method="cor.scores",multi=1,Rscale=F,scaling="1") {
+    ordiscores <- scores(ordi,display="sites")
+    n <- ncol(comm)
+    p <- ncol(ordiscores)
+    specscores <- array(NA,dim=c(n,p))
+    rownames(specscores) <- colnames(comm)
+    colnames(specscores) <- colnames(ordiscores)
+    if (method == "cor.scores") {
+      for (i in 1:n) {
+        for (j in 1:p) {specscores[i,j] <- cor(comm[,i],ordiscores[,j],method="pearson")}
+      }
+    }
+    if (method == "wa.scores") {specscores <- wascores(ordiscores,comm)}
+    if (method == "pcoa.scores") {
+      rownames(ordiscores) <- rownames(comm)
+      eigenv <- ordi$eig
+      accounted <- sum(eigenv)
+      tot <- 2*(accounted/ordi$GOF[2])-(accounted/ordi$GOF[1])
+      eigen.var <- eigenv/(nrow(comm)-1)
+      neg <- length(eigenv[eigenv<0])
+      pos <- length(eigenv[eigenv>0])
+      tot <- tot/(nrow(comm)-1)
+      eigen.percen <- 100*eigen.var/tot
+      eigen.cumpercen <- cumsum(eigen.percen)
+      constant <- ((nrow(comm)-1)*tot)^0.25
+      ordiscores <- ordiscores * (nrow(comm)-1)^-0.5 * tot^-0.5 * constant
+      p1 <- min(p, pos)
+      for (i in 1:n) {
+        for (j in 1:p1) {
+          specscores[i,j] <- cor(comm[,i],ordiscores[,j])*sd(comm[,i])/sd(ordiscores[,j])
+          if(is.na(specscores[i,j])) {specscores[i,j]<-0}
+        }
+      }
+      if (Rscale==T && scaling=="2") {
+        percen <- eigen.var/tot
+        percen <- percen^0.5
+        ordiscores <- sweep(ordiscores,2,percen,"/")   
+        specscores <- sweep(specscores,2,percen,"*")
+      }
+      if (Rscale==F) {
+        specscores <- specscores / constant
+        ordiscores <- ordi$points
+      }        
+      ordi$points <- ordiscores
+      ordi$eig <- eigen.var
+      ordi$eig.percen <- eigen.percen
+      ordi$eig.cumpercen <- eigen.cumpercen
+      ordi$eigen.total <- tot
+      ordi$R.constant <- constant
+      ordi$Rscale <- Rscale
+      ordi$scaling <- scaling
+    }
+    specscores <- specscores * multi    
+    ordi$cproj <- specscores
+    return(ordi)
+  }
+```
+
+
+## 1. Create site-by-species matrix
+
+```{r}
+site_species_matrix <- read.csv("site_species_matrix.csv")
+
+# View the resulting matrix (row 1~8 = Trop_AM1~7,Trop_EcM1~7, Temp_AM1~4,Temp_EcM1~4)
+#print(site_species_matrix)
+LDW<-site_species_matrix[,-1]
+rownames(LDW) <- site_species_matrix$site
+```
+
+## 2. Visualise Beta-Diversity
+
+```{r}
+# Calculate Jaccard
+LDW.dj <- vegdist(LDW, method = "jaccard", binary = TRUE)
+
+# Calculate Bray-Curtis
+LDW.db <- vegdist(LDW, method = "bray", diag = TRUE)
+
+
+# Plot Heatmaps
+levelplot(as.matrix(LDW.dj), 
+          aspect = "iso", 
+          col.regions = inferno, 
+          xlab = "Site Plot", 
+          ylab = "Site Plot", 
+          scales = list(x = list(rot=90, cex = 0.5), y = list(cex = 0.5)),
+          main = "Jaccard Distance")
+
+levelplot(as.matrix(LDW.db), 
+          aspect = "iso", 
+          col.regions = inferno, 
+          xlab = "Site Plot", 
+          ylab = "Site Plot", 
+          scales = list(x = list(rot=90, cex = 0.5), y = list(cex = 0.5)),
+          main = "Bray-Curtis Distance")
+```
+
+```{r}
+## Perform cluster analysis for Jaccard distance
+LDW.ward.dj <- hclust(LDW.dj, method = "ward.D2")
+
+# Plot cluster
+par(mar = c(1, 5, 2, 2) + 0.1)
+plot(LDW.ward.dj, main = "LDW: Ward's Clustering", 
+     ylab = "Squared Jaccard Distance",
+     )
+gplots::heatmap.2(as.matrix(LDW),
+                  distfun = function(x) vegdist(x, method = "jaccard"),
+                  hclustfun = function(x) hclust(x, method = "ward.D2"),
+                  col = viridis, trace = "none", density.info = "none")
+
+
+## Perform cluster analysis for Bray-Curtis distance
+LDW.ward.db <- hclust(LDW.db, method = "ward.D2")
+
+# Plot cluster
+par(mar = c(1, 5, 2, 2) + 0.1)
+plot(LDW.ward.db, main = "LDW: Ward's Clustering", 
+     ylab = "Squared Bray-Curtis Distance")
+
+gplots::heatmap.2(as.matrix(LDW),
+                  distfun = function(x) vegdist(x, method = "bray"),
+                  hclustfun = function(x) hclust(x, method = "ward.D2"),
+                  col = viridis, trace = "none", density.info = "none")
+
+```
+
+```{r}
+## PCoA for Jaccard distance
+LDW.pcoa <- cmdscale(LDW.dj, eig = TRUE, k = 3)
+
+explainvar1 <- round(LDW.pcoa$eig[1] / sum(LDW.pcoa$eig), 3) * 100
+explainvar2 <- round(LDW.pcoa$eig[2] / sum(LDW.pcoa$eig), 3) * 100
+explainvar3 <- round(LDW.pcoa$eig[3] / sum(LDW.pcoa$eig), 3) * 100
+sum.eig <- sum(explainvar1, explainvar2, explainvar3)
+
+# Define plot parameters
+colors <- c("#CCFFCC","#99FF99", "#66FF66", "#33FF33","#33CC33","#009900","#006600", 
+            "#FFFF99","#FFFF66", "#FFFF33", "#FFFF00","#CCCC00","#999900","#666600",
+            "#CCFFCC", "#66FF66", "#33CC33", "#006600",
+            "#FFFF99", "#FFFF33", "#CCCC00", "#666600")
+shapes <- c(16, 16, 16, 16, 16, 16, 16, 
+            16, 16, 16, 16, 16,16, 16, 
+            17, 17, 17, 17,
+            17, 17, 17, 17)
+par(mar = c(5, 5, 1, 2) + 0.1)
+
+# Initiate plot
+plot(LDW.pcoa$points[, 1], LDW.pcoa$points[, 2], 
+     xlim = c(-0.6, 0.6),
+     ylim = c(-0.6, 0.6),
+     xlab = paste("PCoA 1 (", explainvar1, "%)", sep = ""),
+     ylab = paste("PCoA 2 (", explainvar2, "%)", sep = ""),
+     pch = 16, cex = 1.0, type = "n", cex.lab = 1.2, cex.axis = 0.8, axes = FALSE)
+
+# Add axes
+axis(side = 1, labels = TRUE, lwd.ticks = 2, cex.axis = 1, las = 1)
+axis(side = 2, labels = TRUE, lwd.ticks = 2, cex.axis = 1, las = 1)
+abline(h = 0, v = 0, lty = 3)
+box(lwd = 2)
+
+# Add points & labels
+points(jitter(LDW.pcoa$points[, 1], amount = 0.03), 
+       jitter(LDW.pcoa$points[, 2], amount = 0.03), 
+       pch = shapes, cex = 2, bg = colors, col = colors)
+text(jitter(LDW.pcoa$points[, 1], amount = 0.08), 
+     jitter(LDW.pcoa$points[, 2], amount = 0.08),
+     cex = 0.7,
+     labels = c("Tr AM1", "Tr AM2", "Tr AM3", "Tr AM4", "Tr AM5", "Tr AM6", "Tr AM7",
+                "Tr EcM1", "Tr EcM2", "Tr EcM3", "Tr EcM4", "Tr EcM5", "Tr EcM6", "Tr EcM7",
+                "Te AM1", "Te AM2", "Te AM3", "Te AM4", 
+                "Te EcM1", "Te EcM2", "Te EcM3", "Te EcM4"))
+```
+
+
+```{r}
+# First we calculate the relative abundances of each species at each site
+LDW[] <- lapply(LDW, as.numeric)
+
+LDWREL <- LDW
+for (i in 1:nrow(LDW)) {
+    LDWREL[i, ] = LDW[i, ] / sum(LDW[i, ])
+    }
+
+# Now, we use this information to calculate and add species scores
+LDWREL <- as.data.frame(LDWREL)
+LDWREL[] <- lapply(LDWREL, as.numeric)
+
+LDW.pcoa <- add.spec.scores(LDW.pcoa, LDWREL, method = "pcoa.scores")
+#text(LDW.pcoa$cproj[, 1], LDW.pcoa$cproj[, 2], 
+#    labels = row.names(LDW.pcoa$cproj), col = "black")
+
+spe.corr <- add.spec.scores(LDW.pcoa, LDWREL, method = "cor.scores")$cproj
+corrcut <- 0.7  # User-defined cutoff
+imp.spp <- spe.corr[abs(spe.corr[, 1]) >= corrcut | abs(spe.corr[, 2]) >= corrcut, ]
+
+# Permutation test for species abundances across axes
+fit <- envfit(LDW.pcoa, LDWREL, perm = 999)
+
+imp.spp
+fit
+```
+
+```{r}
+## PCoA for Bray-Curtis distance
+LDW.pcoa <- cmdscale(LDW.db, eig = TRUE, k = 3)
+
+explainvar1 <- round(LDW.pcoa$eig[1] / sum(LDW.pcoa$eig), 3) * 100
+explainvar2 <- round(LDW.pcoa$eig[2] / sum(LDW.pcoa$eig), 3) * 100
+explainvar3 <- round(LDW.pcoa$eig[3] / sum(LDW.pcoa$eig), 3) * 100
+sum.eig <- sum(explainvar1, explainvar2, explainvar3)
+
+# Initiate plot
+plot(LDW.pcoa$points[, 1], LDW.pcoa$points[, 2], 
+     xlim = c(-0.6, 0.6),
+     ylim = c(-0.6, 0.6),
+     xlab = paste("PCoA 1 (", explainvar1, "%)", sep = ""),
+     ylab = paste("PCoA 2 (", explainvar2, "%)", sep = ""),
+     pch = 16, cex = 1.0, type = "n", cex.lab = 1.2, cex.axis = 0.8, axes = FALSE)
+
+# Add axes
+axis(side = 1, labels = TRUE, lwd.ticks = 2, cex.axis = 1, las = 1)
+axis(side = 2, labels = TRUE, lwd.ticks = 2, cex.axis = 1, las = 1)
+abline(h = 0, v = 0, lty = 3)
+box(lwd = 2)
+
+# Add points & labels
+points(jitter(LDW.pcoa$points[, 1], amount = 0.03), 
+       jitter(LDW.pcoa$points[, 2], amount = 0.03), 
+       pch = shapes, cex = 2, bg = colors, col = colors)
+text(jitter(LDW.pcoa$points[, 1], amount = 0.08), 
+     jitter(LDW.pcoa$points[, 2], amount = 0.08),
+     cex = 0.7,
+     labels = c("Tr AM1", "Tr AM2", "Tr AM3", "Tr AM4", "Tr AM5", "Tr AM6", "Tr AM7",
+                "Tr EcM1", "Tr EcM2", "Tr EcM3", "Tr EcM4", "Tr EcM5", "Tr EcM6", "Tr EcM7",
+                "Te AM1", "Te AM2", "Te AM3", "Te AM4", 
+                "Te EcM1", "Te EcM2", "Te EcM3", "Te EcM4"))
+```
+
+```{r}
+# First we calculate the relative abundances of each species at each site
+LDW[] <- lapply(LDW, as.numeric)
+
+LDWREL <- LDW
+for (i in 1:nrow(LDW)) {
+    LDWREL[i, ] = LDW[i, ] / sum(LDW[i, ])
+    }
+
+# Now, we use this information to calculate and add species scores
+LDWREL <- as.data.frame(LDWREL)
+LDWREL[] <- lapply(LDWREL, as.numeric)
+
+LDW.pcoa <- add.spec.scores(LDW.pcoa, LDWREL, method = "pcoa.scores")
+??add.spec.scores
+#text(LDW.pcoa$cproj[, 1], LDW.pcoa$cproj[, 2], 
+#    labels = row.names(LDW.pcoa$cproj), col = "black")
+
+spe.corr <- add.spec.scores(LDW.pcoa, LDWREL, method = "cor.scores")$cproj
+corrcut <- 0.7  # User-defined cutoff
+imp.spp <- spe.corr[abs(spe.corr[, 1]) >= corrcut | abs(spe.corr[, 2]) >= corrcut, ]
+
+# Permutation test for species abundances across axes
+fit <- envfit(LDW.pcoa, LDWREL, perm = 999)
+
+imp.spp
+fit
+```
+
+## 3. Beta-Diversity - Hypothesis testing
+
+```{r}
+# Create “Factors” vector
+Mycorr <- c(rep("AM", 7), rep("ECM", 7), rep("AM", 4), rep("ECM", 4))
+Forest <- c(rep("Tropical", 14), rep("Temperate", 8))
+Canopy <- c(1,2,3,4,5,6,7,
+            1,2,3,4,5,6,7,
+            1,2,3,4,
+            1,2,3,4)
+
+# Run PERMANOVA with adonis function
+adonis2(LDW ~ Canopy, method = "jaccard", permutations = 999)
+adonis2(LDW ~ Mycorr + Canopy, method = "jaccard", permutations = 999)
+adonis2(LDW ~ Forest + Canopy, method = "jaccard", permutations = 999)
+adonis2(LDW ~ Mycorr + Forest + Canopy, method = "jaccard", permutations = 999)
+adonis2(LDW ~ Mycorr + Forest * Canopy, method = "jaccard", permutations = 999)
+adonis2(LDW ~ Forest + Mycorr * Canopy, method = "jaccard", permutations = 999)
+adonis2(LDW ~ Mycorr * Forest * Canopy, method = "jaccard", permutations = 999)
+
+adonis2(LDW ~ Canopy, method = "bray", permutations = 999)
+adonis2(LDW ~ Mycorr + Canopy, method = "bray", permutations = 999)
+adonis2(LDW ~ Forest + Canopy, method = "bray", permutations = 999)
+adonis2(LDW ~ Mycorr + Forest + Canopy, method = "bray", permutations = 999)
+adonis2(LDW ~ Mycorr + Forest * Canopy, method = "bray", permutations = 999)
+adonis2(LDW ~ Forest + Mycorr * Canopy, method = "bray", permutations = 999)
+adonis2(LDW ~ Mycorr * Forest * Canopy, method = "bray", permutations = 999)
+
+# Indicator value
+indval <- multipatt(LDW, cluster = Canopy, func = "IndVal.g",
+                    control = how(nperm=999))
+summary(indval)
+
+# Phi coefficient of association
+LDW.rel <- decostand(LDW, method = "total")
+phi <- multipatt(LDW.rel, cluster = Canopy, func = "r.g", 
+                 control = how(nperm=999)) 
+summary(phi)
+```
